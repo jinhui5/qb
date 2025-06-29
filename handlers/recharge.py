@@ -1,4 +1,4 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from uuid import uuid4
 import os
@@ -6,6 +6,7 @@ import random
 import psycopg2
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
+import requests
 
 load_dotenv()
 
@@ -26,7 +27,7 @@ def get_user_info(user_id):
     conn.close()
     return user_info
 
-# 插入订单到数据库
+# 插入充值订单
 def create_recharge_order(order_id, user_id, amount_input, amount_real):
     conn = get_connection()
     cur = conn.cursor()
@@ -38,24 +39,24 @@ def create_recharge_order(order_id, user_id, amount_input, amount_real):
     cur.close()
     conn.close()
 
-# 更新订单状态并充值到账
+# 成功到账处理
 def complete_recharge(order_id):
     conn = get_connection()
     cur = conn.cursor()
 
-    # 查询订单信息
     cur.execute("SELECT user_id, amount_input, amount_real FROM recharge_orders WHERE order_id = %s", (order_id,))
     row = cur.fetchone()
     if not row:
         cur.close()
         conn.close()
         return False
+
     user_id, input_amt, real_amt = row
 
-    # 更新用户余额
+    # 增加余额
     cur.execute("UPDATE users SET usdt_balance = usdt_balance + %s WHERE user_id = %s", (input_amt, user_id))
-    
-    # 添加记录
+
+    # 写入交易记录
     cur.execute("""
         INSERT INTO transactions (user_id, transaction_type, amount, timestamp)
         VALUES (%s, 'recharge', %s, NOW())
@@ -63,13 +64,73 @@ def complete_recharge(order_id):
 
     # 更新订单状态
     cur.execute("UPDATE recharge_orders SET status = 'success' WHERE order_id = %s", (order_id,))
-    
     conn.commit()
     cur.close()
     conn.close()
     return True
 
-# 用户点击“📥充值”按钮
+# 过期订单清理
+def expire_old_orders():
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE recharge_orders
+        SET status = 'expired'
+        WHERE status = 'pending' AND expires_at < NOW()
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
+
+# TronGrid 实时监听到账
+def check_pending_orders_with_trongrid():
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT order_id, user_id, amount_real, created_at, expires_at
+        FROM recharge_orders
+        WHERE status = 'pending'
+    """)
+    orders = cur.fetchall()
+
+    if not orders:
+        cur.close()
+        conn.close()
+        return
+
+    headers = {"TRON-PRO-API-KEY": TRON_API_KEY}
+    url = f"https://api.trongrid.io/v1/accounts/{RECHARGE_ADDRESS}/transactions/trc20?limit=100"
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        data = response.json().get("data", [])
+    except Exception as e:
+        print("TronGrid 请求失败：", e)
+        return
+
+    for order_id, user_id, amount_real, created_at, expires_at in orders:
+        for tx in data:
+            try:
+                token_info = tx.get("token_info", {})
+                if token_info.get("symbol") != "USDT":
+                    continue
+                value = int(tx["value"]) / 10**6
+                to_addr = tx["to"]
+                timestamp = datetime.fromtimestamp(tx["block_timestamp"] / 1000)
+
+                if to_addr.lower() != RECHARGE_ADDRESS.lower():
+                    continue
+
+                if abs(value - float(amount_real)) < 0.001 and created_at <= timestamp <= expires_at:
+                    print(f"✅ 识别到账 - 订单: {order_id}, 金额: {value}, 时间: {timestamp}")
+                    complete_recharge(order_id)
+            except Exception as e:
+                print("⚠️ 解析交易失败:", e)
+
+    cur.close()
+    conn.close()
+
+# 用户点击“📥充值”
 async def recharge_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.callback_query.from_user.id
     user_info = get_user_info(user_id)
@@ -101,28 +162,27 @@ async def recharge_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
 
-# 用户点击“💵USDT充值”
+# 点击“💵USDT充值” → 提示输入金额
 async def recharge_prompt_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await update.callback_query.edit_message_text("请输入你要充值的 💵USDT 金额：")
     context.user_data["action"] = "usdt_recharge"
 
-# 用户输入充值金额后
+# 处理用户输入的金额
 async def handle_recharge_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
-    username = update.message.from_user.username
     user_input = update.message.text
 
     if context.user_data.get("action") != "usdt_recharge":
-        return  # 非充值上下文
+        return
 
     try:
         base_amount = float(user_input)
         if base_amount <= 0:
-            await update.message.reply_text("请输入有效金额。")
+            await update.message.reply_text("🚫 请输入有效金额。")
             return
     except ValueError:
-        await update.message.reply_text("请输入数字金额。")
+        await update.message.reply_text("🚫 金额无效，请输入数字。")
         return
 
     # 生成订单
@@ -132,37 +192,25 @@ async def handle_recharge_amount(update: Update, context: ContextTypes.DEFAULT_T
 
     create_recharge_order(order_id, user_id, base_amount, real_amount)
 
-    # 构造返回消息
-    qr_image_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={RECHARGE_ADDRESS}"
-    message_text = f"""
-请使用支持 TRC20 的钱包向下方地址转账：
+    qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={RECHARGE_ADDRESS}"
+    msg = f"""
+请向以下地址转账：
 
-💵充值金额：**{real_amount:.2f} USDT**
-📬充值地址：`{RECHARGE_ADDRESS}`
 🧾订单编号：`{order_id}`
+📬充值地址：`{RECHARGE_ADDRESS}`
+💵充值金额：**{real_amount:.2f} USDT**
 
-⚠️请务必转账 *精确金额*，否则将无法自动识别。
-⏳订单30分钟内有效，逾期自动取消。
-完成充值后稍等几分钟，系统将自动识别到账并完成入账。
+⚠️ 请务必支付 *精确金额*。
+
+⏳ 订单30分钟内有效。
+
+到账后将自动识别并充值成功。
     """
 
     await update.message.reply_photo(
-        photo=qr_image_url,
-        caption=message_text,
+        photo=qr_url,
+        caption=msg,
         parse_mode="Markdown"
     )
 
-    # 清除上下文
     context.user_data.pop("action", None)
-
-# TODO: 后台任务示意（示例函数）
-def check_pending_orders_with_trongrid():
-    """
-    可作为独立后台线程或定时任务执行
-    - 拉取 recharge_orders where status = 'pending' and expires_at > now()
-    - 调用 TronGrid API 获取转账记录
-    - 判断是否有匹配金额+时间的交易入账
-    - 若匹配成功，调用 complete_recharge(order_id)
-    """
-    pass  # 实际监听可使用定时任务+TronGrid webhook 或定期轮询
-
