@@ -48,8 +48,6 @@ def main():
             await handle_recharge_amount(update, context)
         else:
             await update.message.reply_text("⚠️ 当前无可处理的操作，请从菜单开始。")
-
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_input))
     
     app.run_polling()
 
