@@ -3,6 +3,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandle
 from handlers.start import start
 from handlers.profile import profile, recharge_records, withdraw_records, transfer_records, redpacket_records, escrow_records, back_to_main
 from handlers.exchange import exchange, usdt_to_cny, cny_to_usdt, handle_exchange_input, back_to_main
+from handlers.recharge import recharge_menu, recharge_prompt_amount, handle_recharge_amount
 
 def main():
     # 从环境变量中读取 BOT_TOKEN
@@ -34,6 +35,12 @@ def main():
     
     # 处理用户输入
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_exchange_input))
+
+    # 注册充值回调函数
+    app.add_handler(CallbackQueryHandler(recharge_menu, pattern="^recharge$"))
+    app.add_handler(CallbackQueryHandler(recharge_prompt_amount, pattern="^recharge_usdt$"))
+    app.add_handler(CallbackQueryHandler(back_to_main, pattern="^back_to_main$"))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_recharge_amount))
     
     app.run_polling()
 
