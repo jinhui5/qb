@@ -2,8 +2,8 @@ import os
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters
 from handlers.start import start
 from handlers.profile import profile, recharge_records, withdraw_records, transfer_records, redpacket_records, escrow_records, back_to_main
-from handlers.exchange import exchange, usdt_to_cny, cny_to_usdt, handle_exchange_input, back_to_main
-from handlers.recharge import recharge_menu, recharge_prompt_amount, handle_recharge_amount
+from handlers.exchange import exchange, usdt_to_cny, cny_to_usdt, handle_exchange_input, back_to_main, handle_exchange_input
+from handlers.recharge import recharge_menu, recharge_prompt_amount, handle_recharge_amount, handle_recharge_amount
 
 def main():
     # 从环境变量中读取 BOT_TOKEN
@@ -40,7 +40,16 @@ def main():
     app.add_handler(CallbackQueryHandler(recharge_menu, pattern="^recharge$"))
     app.add_handler(CallbackQueryHandler(recharge_prompt_amount, pattern="^recharge_usdt$"))
     app.add_handler(CallbackQueryHandler(back_to_main, pattern="^back_to_main$"))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_recharge_amount))
+    async def handle_user_input(update, context):
+    action = context.user_data.get("action")
+    if action == "usdt_to_cny" or action == "cny_to_usdt":
+        await handle_exchange_input(update, context)
+    elif action == "usdt_recharge":
+        await handle_recharge_amount(update, context)
+    else:
+        await update.message.reply_text("⚠️ 当前无可处理的操作，请从菜单开始。")
+
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_input))
     
     app.run_polling()
 
