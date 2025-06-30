@@ -8,6 +8,7 @@ from handlers.recharge import recharge_menu, recharge_prompt_amount, handle_rech
 # 后台监听任务
 async def periodic_check(context: ContextTypes.DEFAULT_TYPE):
     print("⏳ 后台任务：检查订单和清理过期订单")
+    from handlers.recharge import check_pending_orders_with_trongrid, expire_old_orders
     check_pending_orders_with_trongrid()
     expire_old_orders()
 
