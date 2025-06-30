@@ -66,7 +66,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 欢迎使用 Ant 钱包 - 让支付更简单
 
 🪪用户名：@{user_name}
-🪪用户ID：`{user_id}`
+🪪用户ID：{user_id}
 💵USDT余额：{usdt_balance:.2f}
 💴CNY余额：{cny_balance:.2f}
 
