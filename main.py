@@ -4,6 +4,7 @@ from handlers.start import start
 from handlers.profile import profile, recharge_records, withdraw_records, transfer_records, redpacket_records, escrow_records, back_to_main
 from handlers.exchange import exchange, usdt_to_cny, cny_to_usdt, handle_exchange_input, back_to_main, handle_exchange_input
 from handlers.recharge import recharge_menu, recharge_prompt_amount, handle_recharge_amount, handle_recharge_amount
+from handlers.transfer import transfer_menu, transfer_usdt, transfer_cny, handle_transfer_amount, handle_transfer_username, confirm_transfer, back_to_transfer 
 
 # 后台监听任务
 async def periodic_check(context: ContextTypes.DEFAULT_TYPE):
@@ -35,7 +36,7 @@ def main():
     app.add_handler(CallbackQueryHandler(escrow_records, pattern="^escrow_records$"))
     app.add_handler(CallbackQueryHandler(back_to_main, pattern="^back_to_main$"))
     
-    # 注册兑换回调函数
+    # 兑换菜单
     app.add_handler(CallbackQueryHandler(exchange, pattern="^exchange$"))
     app.add_handler(CallbackQueryHandler(usdt_to_cny, pattern="^usdt_to_cny$"))
     app.add_handler(CallbackQueryHandler(cny_to_usdt, pattern="^cny_to_usdt$"))
@@ -43,7 +44,28 @@ def main():
     # 处理用户输入
     # app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_exchange_input))
 
-    # 注册充值回调函数
+    # 转账菜单
+    app.add_handler(CallbackQueryHandler(transfer_menu, pattern="^transfer$"))
+    app.add_handler(CallbackQueryHandler(transfer_usdt, pattern="^transfer_usdt$"))
+    app.add_handler(CallbackQueryHandler(transfer_cny, pattern="^transfer_cny$"))
+    app.add_handler(CallbackQueryHandler(confirm_transfer, pattern="^confirm_transfer$"))
+    app.add_handler(CallbackQueryHandler(back_to_transfer, pattern="^transfer_menu$"))
+    async def handle_user_input(update, context):
+    action = context.user_data.get("action")
+    if action in ["usdt_to_cny", "cny_to_usdt"]:
+        await handle_exchange_input(update, context)
+    elif action in ["transfer_usdt", "transfer_cny"]:
+        if context.user_data.get("awaiting_username"):
+            await handle_transfer_username(update, context)
+        else:
+            await handle_transfer_amount(update, context)
+    elif action == "usdt_recharge":
+        await handle_recharge_amount(update, context)
+    else:
+        await update.message.reply_text("⚠️ 当前无可处理的操作，请从菜单开始。")
+
+    
+    # 充值菜单
     app.add_handler(CallbackQueryHandler(recharge_menu, pattern="^recharge$"))
     app.add_handler(CallbackQueryHandler(recharge_prompt_amount, pattern="^recharge_usdt$"))
     app.add_handler(CallbackQueryHandler(back_to_main, pattern="^back_to_main$"))
