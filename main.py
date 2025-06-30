@@ -59,7 +59,7 @@ def main():
             expire_old_orders()
             await asyncio.sleep(60)
 
-    asyncio.create_task(background_tasks())
+    app.job_queue.run_repeating(periodic_check, interval=60, first=10)
     
     app.run_polling()
 
