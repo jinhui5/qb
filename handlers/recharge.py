@@ -207,6 +207,15 @@ async def handle_recharge_amount(update: Update, context: ContextTypes.DEFAULT_T
 到账后将自动识别并充值成功。
     """
 
+    keyboard = [
+    [InlineKeyboardButton("⬅️返回上一级", callback_data="recharge")]
+]
+    await update.message.reply_photo(
+    photo=photo_url,
+    caption=text,
+    reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
     await update.message.reply_photo(
         photo=qr_url,
         caption=msg,
