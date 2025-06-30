@@ -74,6 +74,7 @@ async def handle_user_input(update, context):
     else:
         await update.message.reply_text("⚠️ 当前无可处理的操作，请从菜单开始。")
 
+    app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_input))
 
     app.job_queue.run_repeating(periodic_check, interval=60, first=10)
