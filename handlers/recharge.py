@@ -198,7 +198,7 @@ async def handle_recharge_amount(update: Update, context: ContextTypes.DEFAULT_T
 
 🧾订单编号：`{order_id}`
 📬充值地址：`{RECHARGE_ADDRESS}`
-💵充值金额：**{real_amount:.2f} USDT**
+💵充值金额：**`{real_amount:.2f}` USDT**
 
 ⚠️ 请务必支付 *精确金额*。
 
