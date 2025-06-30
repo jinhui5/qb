@@ -5,6 +5,12 @@ from handlers.profile import profile, recharge_records, withdraw_records, transf
 from handlers.exchange import exchange, usdt_to_cny, cny_to_usdt, handle_exchange_input, back_to_main, handle_exchange_input
 from handlers.recharge import recharge_menu, recharge_prompt_amount, handle_recharge_amount, handle_recharge_amount
 
+# 后台监听任务
+async def periodic_check(context: ContextTypes.DEFAULT_TYPE):
+    print("⏳ 后台任务：检查订单和清理过期订单")
+    check_pending_orders_with_trongrid()
+    expire_old_orders()
+
 def main():
     # 从环境变量中读取 BOT_TOKEN
     bot_token = os.getenv("BOT_TOKEN")
@@ -50,14 +56,6 @@ def main():
             await update.message.reply_text("⚠️ 当前无可处理的操作，请从菜单开始。")
 
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_input))
-
-    # 后台监听任务
-    async def background_tasks():
-        while True:
-            print("⏳ 后台任务：检查订单和清理过期订单")
-            check_pending_orders_with_trongrid()
-            expire_old_orders()
-            await asyncio.sleep(60)
 
     app.job_queue.run_repeating(periodic_check, interval=60, first=10)
     
