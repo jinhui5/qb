@@ -56,17 +56,21 @@ def main():
     app.add_handler(CallbackQueryHandler(recharge_prompt_amount, pattern="^recharge_usdt$"))
     app.add_handler(CallbackQueryHandler(back_to_main, pattern="^back_to_main$"))
     
-    async def handle_user_input(update, context):
+async def handle_user_input(update, context):
     action = context.user_data.get("action")
+    
     if action in ["usdt_to_cny", "cny_to_usdt"]:
         await handle_exchange_input(update, context)
+        
     elif action in ["transfer_usdt", "transfer_cny"]:
         if context.user_data.get("awaiting_username"):
             await handle_transfer_username(update, context)
         else:
             await handle_transfer_amount(update, context)
+            
     elif action == "usdt_recharge":
         await handle_recharge_amount(update, context)
+    
     else:
         await update.message.reply_text("⚠️ 当前无可处理的操作，请从菜单开始。")
 
