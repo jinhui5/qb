@@ -1,4 +1,4 @@
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, CallbackQuery
 from telegram.ext import ContextTypes
 from dotenv import load_dotenv
 import psycopg2
@@ -101,14 +101,22 @@ async def handle_transfer_amount(update: Update, context: ContextTypes.DEFAULT_T
 
     context.user_data["transfer_amount"] = amount
 
-    if context.user_data["action"] == "transfer_usdt":
+    action = context.user_data["action"]
+
+    if action == "transfer_usdt":
         if amount > context.user_data.get("usdt_balance", 0):
             await update.message.reply_text("🚨操作失败，余额不足！")
+            # ✅ 创建虚拟 CallbackQuery 模拟返回按钮点击
+            fake_query = CallbackQuery(update.message.message_id, update.message.from_user, chat_instance=None)
+            update.callback_query = fake_query
             await transfer_menu(update, context)
             return
-    elif context.user_data["action"] == "transfer_cny":
+
+    elif action == "transfer_cny":
         if amount > context.user_data.get("cny_balance", 0):
             await update.message.reply_text("🚨操作失败，余额不足！")
+            fake_query = CallbackQuery(update.message.message_id, update.message.from_user, chat_instance=None)
+            update.callback_query = fake_query
             await transfer_menu(update, context)
             return
 
