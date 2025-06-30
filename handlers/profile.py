@@ -44,7 +44,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
 💵USDT余额：{usdt_balance:.2f}
 💴CNY余额：{cny_balance:.2f}
 """
-    
+await update.message.reply_text(text, parse_mode="Markdown")
     # 创建个人中心菜单按钮
     keyboard = [
         [InlineKeyboardButton("👀查看充值记录", callback_data="recharge_records")],
