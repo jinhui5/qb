@@ -50,7 +50,7 @@ def main():
     app.add_handler(CallbackQueryHandler(transfer_cny, pattern="^transfer_cny$"))
     app.add_handler(CallbackQueryHandler(confirm_transfer, pattern="^confirm_transfer$"))
     app.add_handler(CallbackQueryHandler(back_to_transfer, pattern="^transfer_menu$"))
-    async def handle_user_input(update, context):
+async def handle_user_input(update, context):
     action = context.user_data.get("action")
     if action in ["usdt_to_cny", "cny_to_usdt"]:
         await handle_exchange_input(update, context)
