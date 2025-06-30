@@ -31,12 +31,12 @@ def get_user_id_by_username(username):
 async def transfer_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query:
         await update.callback_query.answer()
-        user_id = update.callback_query.from_user.id
-        username = update.callback_query.from_user.username
+        user = update.callback_query.from_user
     else:
-        user_id = update.message.from_user.id
-        username = update.message.from_user.username
+        user = update.message.from_user
 
+    user_id = user.id
+    username = user.username
     user_info = get_user_info(user_id)
     usdt_balance = round(user_info[1], 2) if user_info else 0
     cny_balance = round(user_info[2], 2) if user_info else 0
@@ -54,12 +54,13 @@ async def transfer_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("💴CNY转账", callback_data="transfer_cny")],
         [InlineKeyboardButton("⬅️返回上一级", callback_data="back_to_main")]
     ]
+
     if update.callback_query:
         await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
     else:
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
-# ✅ 用户点击转账类型按钮
+# ✅ 转账类型选择
 async def transfer_usdt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["action"] = "transfer_usdt"
     user_info = get_user_info(update.callback_query.from_user.id)
@@ -74,7 +75,7 @@ async def transfer_cny(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await update.callback_query.edit_message_text("请输入要转账的 💴CNY 金额：")
 
-# ✅ 用户输入金额
+# ✅ 处理金额输入
 async def handle_transfer_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         amount = float(update.message.text)
@@ -98,17 +99,32 @@ async def handle_transfer_amount(update: Update, context: ContextTypes.DEFAULT_T
 
     if insufficient:
         await update.message.reply_text("🚨操作失败，余额不足！")
-        class DummyCallbackQuery:
-            def __init__(self, from_user): self.from_user = from_user
-            async def answer(self): pass
-        update.callback_query = DummyCallbackQuery(update.message.from_user)
-        await transfer_menu(update, context)
+        # ✅ 显示转账菜单
+        user_info = get_user_info(update.message.from_user.id)
+        usdt_balance = round(user_info[1], 2)
+        cny_balance = round(user_info[2], 2)
+        username = update.message.from_user.username
+
+        text = f"""
+🪪用户名：@{username}
+🪪用户ID：{update.message.from_user.id}
+💵USDT余额：{usdt_balance:.2f}
+💴CNY余额：{cny_balance:.2f}
+
+请选择转账类型：
+        """
+        keyboard = [
+            [InlineKeyboardButton("💵USDT转账", callback_data="transfer_usdt")],
+            [InlineKeyboardButton("💴CNY转账", callback_data="transfer_cny")],
+            [InlineKeyboardButton("⬅️返回上一级", callback_data="back_to_main")]
+        ]
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         return
 
     await update.message.reply_text("请输入你要转账的目标用户名（格式：@用户名）：")
     context.user_data["awaiting_username"] = True
 
-# ✅ 用户输入 @用户名
+# ✅ 用户输入目标 @用户名
 async def handle_transfer_username(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
     if not text.startswith("@"):
@@ -139,7 +155,7 @@ async def handle_transfer_username(update: Update, context: ContextTypes.DEFAULT
 🟢 请确认以下转账信息：
 
 转账给🪪@{to_username}
-转账给🪪用户ID：`{to_user_id}`
+转账给🪪用户ID：{to_user_id}
 转账金额：{amount} {currency}
 钱包💵USDT余额：{usdt_balance}
 钱包💴CNY余额：{cny_balance}
@@ -190,7 +206,7 @@ async def confirm_transfer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except:
         print(f"无法发送通知给用户 {to_user_id}")
 
-# ✅ 回退按钮处理
+# ✅ 返回转账菜单按钮
 async def back_to_transfer(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
     await transfer_menu(update, context)
