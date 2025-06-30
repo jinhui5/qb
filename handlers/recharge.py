@@ -1,225 +1,169 @@
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
-from uuid import uuid4
-import os
 import random
+import string
+import time
+import os
+import requests
 import psycopg2
 from dotenv import load_dotenv
-from datetime import datetime, timedelta
-import requests
 
 load_dotenv()
 
-RECHARGE_ADDRESS = os.getenv("USDT_RECHARGE_ADDRESS")
-TRON_API_KEY = os.getenv("TRONGRID_API_KEY")
+RECHARGE_ADDRESS = os.getenv("TRC20_ADDRESS")  # 管理员设置的收款地址
 
-# 数据库连接
 def get_connection():
     return psycopg2.connect(os.getenv("DATABASE_URL"))
 
-# 获取用户余额信息
 def get_user_info(user_id):
     conn = get_connection()
     cur = conn.cursor()
     cur.execute("SELECT username, usdt_balance, cny_balance FROM users WHERE user_id = %s", (user_id,))
-    user_info = cur.fetchone()
-    cur.close()
-    conn.close()
-    return user_info
-
-# 插入充值订单
-def create_recharge_order(order_id, user_id, amount_input, amount_real):
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO recharge_orders (order_id, user_id, amount_input, amount_real, address, created_at, expires_at, status)
-        VALUES (%s, %s, %s, %s, %s, NOW(), NOW() + INTERVAL '30 minutes', 'pending')
-    """, (order_id, user_id, amount_input, amount_real, RECHARGE_ADDRESS))
-    conn.commit()
-    cur.close()
-    conn.close()
-
-# 成功到账处理
-def complete_recharge(order_id):
-    conn = get_connection()
-    cur = conn.cursor()
-
-    cur.execute("SELECT user_id, amount_input, amount_real FROM recharge_orders WHERE order_id = %s", (order_id,))
     row = cur.fetchone()
-    if not row:
-        cur.close()
-        conn.close()
-        return False
-
-    user_id, input_amt, real_amt = row
-
-    # 增加余额
-    cur.execute("UPDATE users SET usdt_balance = usdt_balance + %s WHERE user_id = %s", (input_amt, user_id))
-
-    # 写入交易记录
-    cur.execute("""
-        INSERT INTO transactions (user_id, transaction_type, amount, timestamp)
-        VALUES (%s, 'recharge', %s, NOW())
-    """, (user_id, input_amt))
-
-    # 更新订单状态
-    cur.execute("UPDATE recharge_orders SET status = 'success' WHERE order_id = %s", (order_id,))
-    conn.commit()
     cur.close()
     conn.close()
-    return True
+    return row
 
-# 过期订单清理
-def expire_old_orders():
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("""
-        UPDATE recharge_orders
-        SET status = 'expired'
-        WHERE status = 'pending' AND expires_at < NOW()
-    """)
-    conn.commit()
-    cur.close()
-    conn.close()
-
-# TronGrid 实时监听到账
-def check_pending_orders_with_trongrid():
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT order_id, user_id, amount_real, created_at, expires_at
-        FROM recharge_orders
-        WHERE status = 'pending'
-    """)
-    orders = cur.fetchall()
-
-    if not orders:
-        cur.close()
-        conn.close()
-        return
-
-    headers = {"TRON-PRO-API-KEY": TRON_API_KEY}
-    url = f"https://api.trongrid.io/v1/accounts/{RECHARGE_ADDRESS}/transactions/trc20?limit=100"
-
-    try:
-        response = requests.get(url, headers=headers, timeout=10)
-        data = response.json().get("data", [])
-    except Exception as e:
-        print("TronGrid 请求失败：", e)
-        return
-
-    for order_id, user_id, amount_real, created_at, expires_at in orders:
-        for tx in data:
-            try:
-                token_info = tx.get("token_info", {})
-                if token_info.get("symbol") != "USDT":
-                    continue
-                value = int(tx["value"]) / 10**6
-                to_addr = tx["to"]
-                timestamp = datetime.fromtimestamp(tx["block_timestamp"] / 1000)
-
-                if to_addr.lower() != RECHARGE_ADDRESS.lower():
-                    continue
-
-                if abs(value - float(amount_real)) < 0.001 and created_at <= timestamp <= expires_at:
-                    print(f"✅ 识别到账 - 订单: {order_id}, 金额: {value}, 时间: {timestamp}")
-                    complete_recharge(order_id)
-            except Exception as e:
-                print("⚠️ 解析交易失败:", e)
-
-    cur.close()
-    conn.close()
-
-# 用户点击“📥充值”
+# ✅ 显示充值菜单
 async def recharge_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.callback_query.from_user.id
-    user_info = get_user_info(user_id)
-
-    if user_info:
-        user_name = user_info[0]
-        usdt_balance = round(user_info[1], 2)
-        cny_balance = round(user_info[2], 2)
+    if update.callback_query:
+        await update.callback_query.answer()
+        user = update.callback_query.from_user
     else:
-        user_name = update.callback_query.from_user.username
-        usdt_balance = 0.00
-        cny_balance = 0.00
+        user = update.message.from_user
+
+    user_info = get_user_info(user.id)
+    usdt_balance = round(user_info[1], 2) if user_info else 0
+    cny_balance = round(user_info[2], 2) if user_info else 0
 
     text = f"""
-🪪用户名：@{user_name}
-🪪用户ID：{user_id}
+🪪用户名：@{user.username}
+🪪用户ID：{user.id}
 💵USDT余额：{usdt_balance:.2f}
 💴CNY余额：{cny_balance:.2f}
 
 请选择充值方式：
     """
-
     keyboard = [
         [InlineKeyboardButton("💵USDT充值", callback_data="recharge_usdt")],
-        [InlineKeyboardButton("⬅️返回上一级", callback_data="back_to_main")],
+        [InlineKeyboardButton("⬅️返回上一级", callback_data="back_to_main")]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    if update.callback_query:
+        await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+    else:
+        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
-    await update.callback_query.answer()
-    await update.callback_query.edit_message_text(text, reply_markup=reply_markup)
-
-# 点击“💵USDT充值” → 提示输入金额
+# ✅ 点击 USDT 充值按钮，提示输入金额
 async def recharge_prompt_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.callback_query.answer()
-    await update.callback_query.edit_message_text("请输入你要充值的 💵USDT 金额：")
     context.user_data["action"] = "usdt_recharge"
+    await update.callback_query.answer()
+    await update.callback_query.edit_message_text("请输入要充值的 💵USDT 金额：")
 
-# 处理用户输入的金额
+# ✅ 用户输入充值金额
 async def handle_recharge_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.message.from_user.id
-    user_input = update.message.text
-
-    if context.user_data.get("action") != "usdt_recharge":
-        return
-
     try:
-        base_amount = float(user_input)
-        if base_amount <= 0:
-            await update.message.reply_text("🚫 请输入有效金额。")
+        amount = float(update.message.text)
+        if amount <= 0:
+            await update.message.reply_text("⚠️ 金额必须大于 0，请重新输入。")
             return
     except ValueError:
-        await update.message.reply_text("🚫 金额无效，请输入数字。")
+        await update.message.reply_text("⚠️ 请输入有效的数字金额。")
         return
 
-    # 生成订单
-    suffix = round(random.uniform(0.01, 0.99), 2)
-    real_amount = round(base_amount + suffix, 2)
-    order_id = str(uuid4())
+    user_id = update.message.from_user.id
+    username = update.message.from_user.username
 
-    create_recharge_order(order_id, user_id, base_amount, real_amount)
+    unique_decimal = round(random.uniform(0.01, 0.99), 2)
+    final_amount = round(amount + unique_decimal, 2)
 
-    qr_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={RECHARGE_ADDRESS}"
-    msg = f"""
-请向以下地址转账：
+    order_id = ''.join(random.choices(string.ascii_uppercase + string.digits, k=12))
+    timestamp = int(time.time())
 
-🧾订单编号：`{order_id}`
-📬充值地址：`{RECHARGE_ADDRESS}`
-💵充值金额：**`{real_amount:.2f}` USDT**
+    # 保存订单
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO recharge_orders (order_id, user_id, amount, final_amount, status, created_at)
+        VALUES (%s, %s, %s, %s, %s, to_timestamp(%s))
+    """, (order_id, user_id, amount, final_amount, "pending", timestamp))
+    conn.commit()
+    cur.close()
+    conn.close()
 
-⚠️ 请务必支付 *精确金额*。
+    photo_url = "https://i.ibb.co/Vxr9cCM/usdt.png"  # 你可替换成你自己的图片链接
 
-⏳ 订单30分钟内有效。
+    caption = f"""
+🆔订单号：`{order_id}`
+📥 请向以下地址转账：
 
-到账后将自动识别并充值成功。
+地址：`{RECHARGE_ADDRESS}`
+金额（含标识）：`{final_amount}` USDT
+
+🕒 请在 30 分钟内完成，否则订单将失效。
     """
 
     keyboard = [
-    [InlineKeyboardButton("⬅️返回上一级", callback_data="recharge")]
-]
-    await update.message.reply_photo(
-    photo=photo_url,
-    caption=text,
-    reply_markup=InlineKeyboardMarkup(keyboard)
-    )
+        [InlineKeyboardButton("⬅️返回上一级", callback_data="recharge")]
+    ]
 
     await update.message.reply_photo(
-        photo=qr_url,
-        caption=msg,
-        parse_mode="Markdown"
+        photo=photo_url,
+        caption=caption,
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
-    context.user_data.pop("action", None)
+# ✅ 后台定时检查订单状态
+def check_pending_orders_with_trongrid():
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT order_id, user_id, final_amount FROM recharge_orders
+        WHERE status = 'pending' AND created_at > NOW() - INTERVAL '30 minutes'
+    """)
+    orders = cur.fetchall()
+
+    for order_id, user_id, final_amount in orders:
+        # 调用 TronGrid 查询该地址的转账记录
+        url = f"https://api.trongrid.io/v1/accounts/{RECHARGE_ADDRESS}/transactions/trc20"
+        try:
+            response = requests.get(url, timeout=10)
+            data = response.json()
+            for tx in data.get("data", []):
+                if tx["type"] != "Transfer":
+                    continue
+                if tx["to"].lower() != RECHARGE_ADDRESS.lower():
+                    continue
+                amount = int(tx["value"]) / (10 ** 6)
+                if round(amount, 2) == round(final_amount, 2):
+                    # 成功匹配到账
+                    cur.execute("UPDATE recharge_orders SET status = 'success' WHERE order_id = %s", (order_id,))
+                    cur.execute("UPDATE users SET usdt_balance = usdt_balance + %s WHERE user_id = %s", (amount, user_id))
+                    cur.execute("INSERT INTO transactions (user_id, transaction_type, amount, timestamp) VALUES (%s, 'recharge', %s, NOW())", (user_id, amount))
+                    conn.commit()
+
+                    # 尝试通知用户
+                    try:
+                        from telegram import Bot
+                        bot = Bot(token=os.getenv("BOT_TOKEN"))
+                        bot.send_message(chat_id=user_id, text=f"✅ 充值成功！已到账 {amount} USDT，感谢使用 Ant 钱包。")
+                    except Exception as e:
+                        print(f"通知用户失败: {e}")
+                    break
+        except Exception as e:
+            print(f"TronGrid 请求失败: {e}")
+
+    cur.close()
+    conn.close()
+
+# ✅ 清理超时订单
+def expire_old_orders():
+    conn = get_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        DELETE FROM recharge_orders
+        WHERE status = 'pending' AND created_at < NOW() - INTERVAL '30 minutes'
+    """)
+    conn.commit()
+    cur.close()
+    conn.close()
