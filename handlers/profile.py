@@ -40,7 +40,7 @@ async def profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # 格式化个人中心消息
     profile_message = f"""
 🪪用户名：@{user_name}
-🪪用户ID：{user_id}
+🪪用户ID：`{user_id}`
 💵USDT余额：{usdt_balance:.2f}
 💴CNY余额：{cny_balance:.2f}
 """
